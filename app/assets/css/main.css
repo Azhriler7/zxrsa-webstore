@@ -4,3 +4,94 @@
 html {
   scroll-behavior: smooth;
 }
+
+/* Tactile & Bouncy Mechanical Cyber Button */
+.cyber-btn-primary {
+  transition: all 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.cyber-btn-primary:hover:not(:disabled) {
+  transform: scale(1.02) translateY(-1px);
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+.cyber-btn-primary:active:not(:disabled) {
+  transform: scale(0.95) translateY(2px);
+}
+
+.cyber-btn-secondary {
+  transition: all 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.cyber-btn-secondary:hover:not(:disabled) {
+  transform: scale(1.02) translateY(-1px);
+  border-color: rgba(0, 240, 255, 0.6);
+  box-shadow: 0 6px 18px rgba(0, 240, 255, 0.16);
+}
+.cyber-btn-secondary:active:not(:disabled) {
+  transform: scale(0.95) translateY(2px);
+}
+
+/* Interactive Card Forward Lift & Click Animation */
+.cyber-card-interactive {
+  transition: all 200ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.cyber-card-interactive:hover:not(:disabled) {
+  transform: translateY(-4px) scale(1.015);
+  box-shadow: 0 14px 28px -6px rgba(0, 0, 0, 0.28), 0 0 18px rgba(0, 240, 255, 0.16);
+}
+.cyber-card-interactive:active:not(:disabled) {
+  transform: translateY(1px) scale(0.975);
+}
+.cyber-card-selected {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 12px 26px -6px rgba(0, 240, 255, 0.22), 0 0 20px rgba(0, 240, 255, 0.18);
+}
+
+/* Fade-in from Bottom / Side Animations */
+@keyframes fadeInUp {
+  0% { opacity: 0; transform: translateY(22px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInLeft {
+  0% { opacity: 0; transform: translateX(-24px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+@keyframes fadeInRight {
+  0% { opacity: 0; transform: translateX(24px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+.animate-fade-up {
+  animation: fadeInUp 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fade-left {
+  animation: fadeInLeft 450ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fade-right {
+  animation: fadeInRight 450ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Sharp Slide-In Toast Animation */
+@keyframes cyberSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(110%) skewX(-4deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) skewX(0deg);
+  }
+}
+.cyber-toast-enter {
+  animation: cyberSlideIn 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Subtle Cyber Grid */
+.cyber-grid-bg {
+  background-size: 36px 36px;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+html:not(.dark) .cyber-grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(24, 24, 27, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(24, 24, 27, 0.035) 1px, transparent 1px);
+}

@@ -1,9 +1,13 @@
 export default defineEventHandler(async (event) => {
+  // Hanya proteksi endpoint di bawah /api/admin
   if (!event.path.startsWith('/api/admin')) return
+
+  // FIX PENTING: Jangan blokir endpoint login/logout (/api/admin/auth/*)
+  if (event.path.startsWith('/api/admin/auth')) return
 
   const session = await requireUserSession(event)
 
-  // Setelah types/auth.d.ts dibuat, 'role' sudah dikenal TypeScript
-  if ((session.user as { role?: string }).role !== 'admin')
-    throw createError({ statusCode: 403, message: 'Akses ditolak.' })
+  if ((session.user as { role?: string })?.role !== 'admin') {
+    throw createError({ statusCode: 403, message: 'Akses ditolak. Khusus Admin.' })
+  }
 })

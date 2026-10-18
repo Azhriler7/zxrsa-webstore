@@ -1,212 +1,244 @@
 <script setup lang="ts">
-interface Variant {
-  id: string; duration: string; price: number; promoPrice: number | null
-  finalPrice: number; isPromo: boolean; stockCount: number; isCustomGmail: boolean
-}
-interface Product {
-  id: string; name: string; description: string | null
-  image: string | null; promoBadge: string | null; variants: Variant[]
+import type { ProductItem, VariantItem } from '~/components/ProductCheckoutSection.vue'
+import type { InvoiceOrderData } from '~/components/InvoiceCardStep.vue'
+
+const { data: productsData, status, refresh: refreshProducts } = await useFetch<ProductItem[]>('/api/products')
+const products = computed(() => productsData.value ?? [])
+
+const currentView = ref<'catalog' | 'qris' | 'invoice'>('catalog')
+const isProcessing = ref(false)
+const isCheckingPayment = ref(false)
+
+const isTransitionLoading = ref(false)
+const transitionTitle = ref('')
+const transitionSubtitle = ref('')
+
+const cyberToast = reactive<{
+  open: boolean
+  type: 'success' | 'error'
+  message?: string
+}>({
+  open: false,
+  type: 'success',
+  message: undefined,
+})
+
+function triggerCyberToast(type: 'success' | 'error', message?: string) {
+  cyberToast.open = false
+  setTimeout(() => {
+    cyberToast.type = type
+    cyberToast.message = message
+    cyberToast.open = true
+  }, 40)
 }
 
-const { data: products, status } = await useFetch<Product[]>('/api/products')
-
-const selectedProduct = ref<Product | null>(null)
-const selectedVariant = ref<Variant | null>(null)
-const customerEmail   = ref('')
-const customGmail     = ref('')
-const isCheckoutOpen  = ref(false)
-const isProcessing    = ref(false)
-const qrisModal       = ref(false)
-const qrisData        = ref<{
-  orderId: string; qrisImageUrl: string; amount: number; expiresAt: string
+const activeQris = ref<{
+  orderId: string
+  qrisImageUrl: string
+  amount: number
+  expiresAt: string
+  productName: string
+  duration: string
+  customerEmail: string
 } | null>(null)
+
+const completedOrder = ref<InvoiceOrderData | null>(null)
 let pollInterval: ReturnType<typeof setInterval> | null = null
-const toast = useToast()
 
-const formatRupiah = (n: number) =>
-  new Intl.NumberFormat('id-ID',{ style:'currency', currency:'IDR', minimumFractionDigits:0 }).format(n)
-
-function openCheckout(product: Product, variant: Variant) {
-  if (variant.stockCount === 0 && !variant.isCustomGmail) return
-  selectedProduct.value = product; selectedVariant.value = variant
-  customerEmail.value = ''; customGmail.value = ''; isCheckoutOpen.value = true
-}
-
-function closeQrisModal() {
-  if (pollInterval) clearInterval(pollInterval)
-  qrisModal.value = false
-}
-
-onUnmounted(() => { if (pollInterval) clearInterval(pollInterval) })
-
-async function handleCheckout() {
-  if (!selectedVariant.value || !customerEmail.value) return
-  if (selectedVariant.value.isCustomGmail && !customGmail.value) {
-    toast.add({ title: 'Gmail wajib diisi.', color: 'error' }); return
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
   }
+}
 
+onUnmounted(() => stopPolling())
+
+async function runTransitionOverlay(title: string, subtitle: string, durationMs = 750) {
+  transitionTitle.value = title
+  transitionSubtitle.value = subtitle
+  isTransitionLoading.value = true
+  await new Promise(resolve => setTimeout(resolve, durationMs))
+  isTransitionLoading.value = false
+}
+
+async function handleCheckoutSubmit(payload: {
+  product: ProductItem
+  variant: VariantItem
+  customerEmail: string
+  customGmailAccount?: string
+}) {
   isProcessing.value = true
   try {
     const res = await $fetch<{
-      orderId: string; qrisImageUrl: string; amount: number; expiresAt: string
+      orderId: string
+      qrisImageUrl: string
+      amount: number
+      expiresAt: string
     }>('/api/checkout', {
       method: 'POST',
       body: {
-        variantId:          selectedVariant.value.id,
-        customerEmail:      customerEmail.value,
-        customGmailAccount: selectedVariant.value.isCustomGmail ? customGmail.value : undefined,
+        variantId: payload.variant.id,
+        customerEmail: payload.customerEmail,
+        customGmailAccount: payload.customGmailAccount,
       },
     })
 
-    isCheckoutOpen.value = false
-    qrisData.value       = res
-    qrisModal.value      = true
+    await runTransitionOverlay(
+      'Menyiapkan Gerbang Pembayaran QRIS...',
+      `Mengamankan alokasi stok untuk pesanan ${res.orderId}`,
+      750
+    )
 
-    // Polling status pembayaran setiap 3 detik
-    pollInterval = setInterval(async () => {
-      try {
-        const { isPaid } = await $fetch<{ isPaid: boolean }>(`/api/payment/status/${res.orderId}`)
-        if (isPaid) {
-          clearInterval(pollInterval!)
-          qrisModal.value = false
-          navigateTo(`/success?orderId=${res.orderId}`)
-        }
+    activeQris.value = {
+      ...res,
+      productName: payload.product.name,
+      duration: payload.variant.duration,
+      customerEmail: payload.customerEmail,
+    }
+
+    currentView.value = 'qris'
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+
+    stopPolling()
+    pollInterval = setInterval(() => checkPaymentStatus(), 3000)
+  } catch (err: any) {
+    triggerCyberToast(
+      'error',
+      err?.data?.message || 'Aksi Ditolak: Transaksi Gagal. Silakan periksa saldo atau koneksi Anda.'
+    )
+  } finally {
+    isProcessing.value = false
+  }
+}
+
+async function checkPaymentStatus() {
+  if (!activeQris.value) return
+  isCheckingPayment.value = true
+  try {
+    const res = await $fetch<{
+      isPaid: boolean
+      status: string
+      order?: InvoiceOrderData | null
+    }>(`/api/payment/status/${activeQris.value.orderId}`)
+
+    if (res.isPaid) {
+      stopPolling()
+      let resolvedOrder: InvoiceOrderData | null = null
+      if (res.order) {
+        resolvedOrder = res.order
+      } else {
+        resolvedOrder = await $fetch<InvoiceOrderData>(`/api/order/${activeQris.value.orderId}`)
       }
-      catch { /* masih pending, lanjut polling */ }
-    }, 3000)
+
+      await runTransitionOverlay(
+        'Pembayaran Terverifikasi!',
+        'Menerbitkan Kartu Invoice Resmi & Mengambil Kredensial Akun...',
+        800
+      )
+
+      completedOrder.value = resolvedOrder
+      await refreshProducts()
+      currentView.value = 'invoice'
+      triggerCyberToast('success')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } else if (res.status === 'deny' || res.status === 'expire' || res.status === 'cancel') {
+      stopPolling()
+      triggerCyberToast('error')
+      resetToCatalog()
+    }
+  } catch {
+    // Still pending
+  } finally {
+    isCheckingPayment.value = false
   }
-  catch (err: any) {
-    toast.add({ title: 'Gagal', description: err?.data?.message ?? 'Terjadi kesalahan.', color: 'error' })
+}
+
+async function handleQrisExpired() {
+  stopPolling()
+  const expiredOrderId = activeQris.value?.orderId
+  if (expiredOrderId) {
+    await $fetch(`/api/payment/expire/${expiredOrderId}`, { method: 'POST' }).catch(() => {})
   }
-  finally { isProcessing.value = false }
+  triggerCyberToast(
+    'error',
+    'Aksi Ditolak: Waktu pembayaran QRIS (5 menit) telah habis. Pesanan dibatalkan otomatis.'
+  )
+  resetToCatalog()
+}
+
+function resetToCatalog() {
+  stopPolling()
+  currentView.value = 'catalog'
+  activeQris.value = null
+  completedOrder.value = null
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-50 dark:bg-gray-950">
+  <div class="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 transition-colors">
+    <UserNavbar @go-home="resetToCatalog" />
 
-    <header class="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
-      <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <UIcon name="i-lucide-zap" class="text-primary-500 size-6" />
-          <span class="font-bold text-lg">ZXRSA STORE</span>
-        </div>
-        <UBadge color="success" variant="subtle" label="✓ Pengiriman Otomatis" />
-      </div>
-    </header>
-
-    <div class="bg-linear-to-br from-primary-600 to-primary-800 text-white py-12 px-4 text-center">
-      <h1 class="text-3xl font-bold mb-2">Akun Digital Premium</h1>
-      <p class="text-primary-100">Netflix · Spotify · CapCut · dan banyak lagi</p>
-    </div>
-
-    <main class="max-w-6xl mx-auto px-4 py-10">
-      <div v-if="status === 'pending'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <USkeleton v-for="n in 6" :key="n" class="h-64 rounded-xl" />
-      </div>
-
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <UCard v-for="product in products" :key="product.id" class="overflow-hidden hover:shadow-lg transition-shadow">
-          <template #header>
-            <div class="relative">
-              <img v-if="product.image" :src="product.image" :alt="product.name" class="w-full h-40 object-cover" />
-              <div v-else class="w-full h-40 bg-linear-to-br from-primary-100 to-primary-200 dark:from-primary-900 dark:to-primary-800 flex items-center justify-center">
-                <UIcon name="i-lucide-package" class="size-16 text-primary-400" />
-              </div>
-              <UBadge v-if="product.promoBadge" color="error" class="absolute top-2 right-2" :label="product.promoBadge" />
-            </div>
-          </template>
-
-          <div class="space-y-3">
-            <h2 class="font-bold text-lg">{{ product.name }}</h2>
-            <p v-if="product.description" class="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
-              {{ product.description }}
-            </p>
-
-            <div class="space-y-2">
-              <div
-                v-for="variant in product.variants" :key="variant.id"
-                class="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-primary-400 transition-colors"
-                :class="{ 'opacity-50': variant.stockCount === 0 && !variant.isCustomGmail }"
-              >
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="font-medium text-sm">{{ variant.duration }}</span>
-                    <UBadge v-if="variant.isPromo"       color="error" variant="subtle" size="xs" label="PROMO" />
-                    <UBadge v-if="variant.isCustomGmail" color="info"  variant="subtle" size="xs" label="Gmail Sendiri" />
-                  </div>
-                  <div class="flex items-center gap-2 mt-0.5">
-                    <span class="font-bold text-primary-600 dark:text-primary-400">{{ formatRupiah(variant.finalPrice) }}</span>
-                    <span v-if="variant.isPromo" class="text-xs text-gray-400 line-through">{{ formatRupiah(variant.price) }}</span>
-                  </div>
-                  <span class="text-xs text-gray-400">
-                    {{ variant.isCustomGmail ? 'Gmail sendiri' : variant.stockCount > 0 ? `${variant.stockCount} tersedia` : 'Stok habis' }}
-                  </span>
-                </div>
-                <UButton
-                  size="sm"
-                  :disabled="variant.stockCount === 0 && !variant.isCustomGmail"
-                  :label="variant.stockCount === 0 && !variant.isCustomGmail ? 'Habis' : 'Beli'"
-                  :color="variant.stockCount === 0 && !variant.isCustomGmail ? 'neutral' : 'primary'"
-                  @click="openCheckout(product, variant)"
-                />
-              </div>
-            </div>
+    <!-- Cyber Loading Transition Overlay -->
+    <Teleport to="body">
+      <div
+        v-if="isTransitionLoading"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-md"
+      >
+        <div class="w-full max-w-sm rounded-2xl border border-[#00f0ff]/40 bg-zinc-900/95 p-6 text-center space-y-4 shadow-[0_0_35px_rgba(0,240,255,0.2)] animate-fade-up">
+          <div class="size-12 rounded-xl bg-[#00f0ff]/10 border border-[#00f0ff]/40 flex items-center justify-center mx-auto text-[#00f0ff]">
+            <svg class="size-6 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+              <path class="opacity-95" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
           </div>
-        </UCard>
+          <div class="space-y-1">
+            <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-[#00f0ff]">SYSTEM TRANSITION // PROCESSING</p>
+            <h3 class="font-extrabold text-base text-white">{{ transitionTitle }}</h3>
+            <p class="text-xs text-zinc-400">{{ transitionSubtitle }}</p>
+          </div>
+        </div>
       </div>
-    </main>
+    </Teleport>
 
-    <!-- Modal Checkout -->
-    <UModal v-model:open="isCheckoutOpen" :title="`Beli ${selectedProduct?.name} – ${selectedVariant?.duration}`">
-      <template #body>
-        <div class="space-y-4 p-1">
-          <UAlert color="primary" variant="subtle" icon="i-lucide-info"
-            :description="`${selectedProduct?.name} · ${selectedVariant?.duration} · ${formatRupiah(selectedVariant?.finalPrice ?? 0)}`"
-          />
-          <UFormField label="Email kamu" required>
-            <UInput v-model="customerEmail" type="email" placeholder="email@gmail.com" icon="i-lucide-mail" class="w-full" />
-          </UFormField>
-          <UFormField v-if="selectedVariant?.isCustomGmail" label="Gmail kamu" description="Gmail yang dipakai untuk akun ini" required>
-            <UInput v-model="customGmail" type="email" placeholder="gmailkamu@gmail.com" icon="i-lucide-at-sign" class="w-full" />
-          </UFormField>
-          <UButton
-            block size="lg" :loading="isProcessing"
-            :disabled="!customerEmail || (selectedVariant?.isCustomGmail && !customGmail)"
-            label="Buat QRIS" icon="i-lucide-qr-code"
-            @click="handleCheckout"
-          />
-          <p class="text-xs text-center text-gray-400">Bayar via QRIS · Data akun dikirim otomatis setelah lunas</p>
-        </div>
-      </template>
-    </UModal>
+    <template v-if="currentView === 'catalog'">
+      <HeroBanner />
+      <ProductCheckoutSection
+        :products="products"
+        :loading="status === 'pending'"
+        :processing="isProcessing"
+        @submit-checkout="handleCheckoutSubmit"
+        @validation-failed="(msg: string) => triggerCyberToast('error', msg)"
+      />
+      <ExtraSections />
+    </template>
 
-    <!-- Modal QRIS -->
-    <UModal v-model:open="qrisModal" title="Scan QRIS untuk Bayar" :dismissible="false">
-      <template #body>
-        <div class="space-y-4 p-2 text-center">
-          <UAlert color="warning" variant="subtle" icon="i-lucide-clock"
-            description="Jangan tutup halaman ini sebelum bayar. Halaman otomatis redirect setelah pembayaran terdeteksi."
-          />
-          <!-- qrisImageUrl = data.qrisImage dari Mutasiku (PNG langsung) -->
-          <div class="flex justify-center">
-            <img
-              v-if="qrisData?.qrisImageUrl"
-              :src="qrisData.qrisImageUrl"
-              alt="QRIS Pembayaran"
-              class="w-64 h-64 border-4 border-primary-200 rounded-2xl"
-            />
-          </div>
-          <p class="font-bold text-xl text-primary-600">{{ formatRupiah(qrisData?.amount ?? 0) }}</p>
-          <p class="text-xs text-gray-400">Order: {{ qrisData?.orderId }}</p>
-          <div class="flex items-center justify-center gap-2 text-sm text-gray-500">
-            <UIcon name="i-lucide-loader-circle" class="animate-spin size-4" />
-            Menunggu pembayaran...
-          </div>
-          <UButton block color="neutral" variant="ghost" label="Batal" @click="closeQrisModal" />
-        </div>
-      </template>
-    </UModal>
+    <template v-else-if="currentView === 'qris' && activeQris">
+      <QrisPaymentStep
+        :qris-data="activeQris"
+        :checking-status="isCheckingPayment"
+        @check-now="checkPaymentStatus"
+        @cancel="resetToCatalog"
+        @expired="handleQrisExpired"
+      />
+    </template>
 
+    <template v-else-if="currentView === 'invoice' && completedOrder">
+      <InvoiceCardStep
+        :order="completedOrder"
+        @back-to-shop="resetToCatalog"
+        @download-success="triggerCyberToast('success')"
+      />
+    </template>
+
+    <!-- Floating WhatsApp Logo at Bottom-Right (ONLY on User Storefront) -->
+    <FloatingWhatsApp />
+
+    <CyberToast
+      v-model:open="cyberToast.open"
+      :type="cyberToast.type"
+      :message="cyberToast.message"
+    />
   </div>
 </template>

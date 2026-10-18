@@ -1,6 +1,5 @@
-import { sql } from 'drizzle-orm'
+import { sql, relations } from 'drizzle-orm'
 import { integer, text, sqliteTable, real } from 'drizzle-orm/sqlite-core'
-import { relations } from 'drizzle-orm'
 
 export type DayOfWeek =
   | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday'
@@ -8,19 +7,16 @@ export type DayOfWeek =
 
 export type TransactionStatus = 'pending' | 'settlement' | 'deny' | 'expire' | 'cancel'
 
-// ─── products ─────────────────────────────────────────────────
-
 export const products = sqliteTable('products', {
   id:          text('id').primaryKey(),
   name:        text('name').notNull(),
   description: text('description'),
   image:       text('image'),
   promoBadge:  text('promo_badge'),
+  rules:       text('rules'),
   isActive:    integer('is_active', { mode: 'boolean' }).notNull().default(true),
   createdAt:   text('created_at').notNull().default(sql`(datetime('now'))`),
 })
-
-// ─── productVariants ──────────────────────────────────────────
 
 export const productVariants = sqliteTable('product_variants', {
   id:                text('id').primaryKey(),
@@ -28,30 +24,27 @@ export const productVariants = sqliteTable('product_variants', {
                        .references(() => products.id, { onDelete: 'cascade' }),
   duration:          text('duration').notNull(),
   price:             real('price').notNull(),
+  isActive:          integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  isPromoActive:     integer('is_promo_active', { mode: 'boolean' }).notNull().default(false),
+  discountAmount:    real('discount_amount'),
   promoPrice:        real('promo_price'),
-  promoDayOfWeek:    text('promo_day_of_week'),    // DayOfWeek | null
-  promoSpecificDate: text('promo_specific_date'),  // 'MM-DD' | null
+  promoStartDate:    text('promo_start_date'),
+  promoDayOfWeek:    text('promo_day_of_week'),
+  promoSpecificDate: text('promo_specific_date'),
+  promoRepeatYearly: integer('promo_repeat_yearly', { mode: 'boolean' }).notNull().default(false),
   isCustomGmail:     integer('is_custom_gmail', { mode: 'boolean' }).notNull().default(false),
   createdAt:         text('created_at').notNull().default(sql`(datetime('now'))`),
 })
-
-// ─── accountStocks ────────────────────────────────────────────
 
 export const accountStocks = sqliteTable('account_stocks', {
   id:          integer('id', { mode: 'number' }).primaryKey({ autoIncrement: true }),
   variantId:   text('variant_id').notNull()
                  .references(() => productVariants.id, { onDelete: 'cascade' }),
-  accountData: text('account_data').notNull(),   // 'email:password'
+  accountData: text('account_data').notNull(),
   isSold:      integer('is_sold', { mode: 'boolean' }).notNull().default(false),
   soldAt:      text('sold_at'),
   createdAt:   text('created_at').notNull().default(sql`(datetime('now'))`),
 })
-
-// ─── transactions ─────────────────────────────────────────────
-//
-// mutasikuPaymentId = data.id dari response Mutasiku
-// qrisImageUrl      = data.qrisImage dari response Mutasiku
-//
 
 export const transactions = sqliteTable('transactions', {
   id:                   text('id').primaryKey(),
@@ -67,8 +60,6 @@ export const transactions = sqliteTable('transactions', {
   createdAt:            text('created_at').notNull().default(sql`(datetime('now'))`),
 })
 
-// ─── users ────────────────────────────────────────────────────
-
 export const users = sqliteTable('users', {
   id:        text('id').primaryKey(),
   email:     text('email').notNull().unique(),
@@ -77,14 +68,12 @@ export const users = sqliteTable('users', {
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
 })
 
-// ─── relations ────────────────────────────────────────────────
-
 export const productsRelations = relations(products, ({ many }) => ({
   variants: many(productVariants),
 }))
 
 export const productVariantsRelations = relations(productVariants, ({ one, many }) => ({
-  product:      one(products,      { fields: [productVariants.productId], references: [products.id] }),
+  product:      one(products, { fields: [productVariants.productId], references: [products.id] }),
   stocks:       many(accountStocks),
   transactions: many(transactions),
 }))
