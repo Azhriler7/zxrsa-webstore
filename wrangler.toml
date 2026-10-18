@@ -1,0 +1,11 @@
+name = "zxrsa-webstore-db"
+pages_build_output_dir = ".output/public"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "zxrsa-db"
+database_id = "60a99e5b-8f47-40ef-9fd5-0fe269c5765e" 
+migrations_dir = "server/db/migrations/sqlite"
+
