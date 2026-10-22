@@ -16,6 +16,8 @@ export default defineNuxtConfig({
   },
 
   nitro: {
+    preset: 'cloudflare_pages', 
+    
     cloudflare: {
       wrangler: {
         compatibility_flags: ['nodejs_compat'],
